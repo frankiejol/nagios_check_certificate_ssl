@@ -1,0 +1,96 @@
+#!/usr/bin/perl
+
+use warnings;
+use strict;
+
+use DateTime::Format::DateParse;
+use Getopt::Long;
+use IPC::Run3;
+
+my $help;
+my $version;
+my $VERBOSE = $ENV{TERM};
+
+my $OUT = '';
+my $RET = 'OK';
+my %PERF;
+
+my %STATUS = (
+    OK => 0
+    ,WARNING => 1
+    ,CRITICAL => 2
+    ,UNKNOWN => 3
+);
+
+
+GetOptions(
+    help => \$help
+    ,version => \$version
+    ,verbose => \$VERBOSE
+) or exit;
+
+my $usage = "$0 [--help] [--version] /path/to/file.crt";
+
+sub parse {
+    my ($field, $date) = @_;
+
+    my $diff = DateTime->now- $date;
+
+    my $days_abs = $diff->years * 365 + $diff->months*30 + $diff->days;
+    $PERF{$field} = $days_abs;
+
+    warn $field." ".$date->ymd." : ".$diff->is_positive
+    if $VERBOSE;
+
+    if ($field =~ /notBefore/) {
+        if (!$diff->is_positive) {
+            $RET = 'CRITICAL';
+            $OUT .= "cert is yet not active. It will be at ".$date->ymd;
+        }
+    } elsif($field =~ /notAfter/) {
+        if ( ! $diff->is_negative ) {
+            $RET = 'CRITICAL';
+            $OUT .= "cert is out of date since ".$date->ymd;
+        } else {
+            if ($diff->years < 1 && $diff->months <1 && $diff->days < 7) {
+                $RET = 'WARNING';
+                $OUT .= "cert will be inactive in ".$diff->days." at "
+                .$date->ymd;
+            }
+        }
+    } else {
+        die "Error: unknown field $field";
+    }
+}
+
+my @CRT = @ARGV;
+
+die "Error: crt file required\n$usage\n" if !@CRT;
+
+for my $crt (@CRT) {
+    my @cmd = ("/usr/bin/openssl",
+            'x509','-in', $crt,'-dates','-noout'
+            );
+
+    my ($out, $err, $in);
+    run3(\@cmd, \$in, \$out ,\$err);
+    warn $out if $VERBOSE;
+    if ($err) {
+        $OUT.=$err;
+        $RET = 'UNKNOWN' if $RET ne 'CRITICAL';
+    }
+    for my $line (split /\n/,$out) {
+        my ($field,$value) = $line =~ /^(.*?)=(.*)/;
+        my $date =  DateTime::Format::DateParse->parse_datetime( $value );
+        parse($field,$date);
+    }
+}
+
+my $OUT_PERF = '';
+for my $field (reverse sort keys %PERF) {
+    $OUT_PERF .= " , " if $OUT_PERF;
+    $OUT_PERF .= "$field: $PERF{$field} ";
+}
+print "$RET: $OUT | $OUT_PERF\n";
+
+exit $STATUS{$RET};
