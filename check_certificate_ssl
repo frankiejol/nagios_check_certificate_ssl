@@ -3,6 +3,7 @@
 use warnings;
 use strict;
 
+use Date::Calc qw(Today Delta_Days);
 use DateTime::Format::DateParse;
 use Getopt::Long;
 use IPC::Run3;
@@ -10,6 +11,9 @@ use IPC::Run3;
 my $help;
 my $version;
 my $VERBOSE = $ENV{TERM};
+
+my $DAYS_CRIT = 7;
+my $DAYS_WARN = 31;
 
 my $OUT = '';
 my $RET = 'OK';
@@ -34,29 +38,32 @@ my $usage = "$0 [--help] [--version] /path/to/file.crt";
 sub parse {
     my ($field, $date) = @_;
 
-    my $diff = DateTime->now- $date;
+    my $days = Date::Calc::Delta_Days(
+        split(/-/,$date->ymd) , Today());
 
-    my $days_abs = $diff->years * 365 + $diff->months*30 + $diff->days;
-    $PERF{$field} = $days_abs;
-
-    warn $field." ".$date->ymd." : ".$diff->is_positive
+    warn $field." ".$date->ymd." : ".$days
     if $VERBOSE;
 
+    $PERF{$field} = abs($days);
+
     if ($field =~ /notBefore/) {
-        if (!$diff->is_positive) {
+        if ($days<0) {
             $RET = 'CRITICAL';
             $OUT .= "cert is yet not active. It will be at ".$date->ymd;
         }
     } elsif($field =~ /notAfter/) {
-        if ( ! $diff->is_negative ) {
+        if ( $days >=1 ) {
             $RET = 'CRITICAL';
             $OUT .= "cert is out of date since ".$date->ymd;
         } else {
-            if ($diff->years < 1 && $diff->months <1 && $diff->days < 7) {
-                $RET = 'WARNING';
-                $OUT .= "cert will be inactive in ".$diff->days." at "
-                .$date->ymd;
+            $days = abs($days);
+            if ( $days <= $DAYS_CRIT ) {
+                $RET = "CRITICAL" 
+            } elsif ($days < $DAYS_WARN) {
+                $RET = 'WARNING' if $RET eq "OK";
             }
+            $OUT .= "cert will be inactive in $days days at "
+                .$date->ymd;
         }
     } else {
         die "Error: unknown field $field";
@@ -87,9 +94,9 @@ for my $crt (@CRT) {
 }
 
 my $OUT_PERF = '';
-for my $field (reverse sort keys %PERF) {
-    $OUT_PERF .= " , " if $OUT_PERF;
-    $OUT_PERF .= "$field: $PERF{$field} ";
+for my $field (sort keys %PERF) {
+    $OUT_PERF .= " " if $OUT_PERF;
+    $OUT_PERF .= "$field=$PERF{$field}";
 }
 print "$RET: $OUT | $OUT_PERF\n";
 
