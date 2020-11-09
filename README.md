@@ -14,7 +14,7 @@ check plugins.
 This nagios check requires Perl and some modules. This is the debian and derivates
 installation guide, other distributions should be similar:
 
-   `sudo apt install libdatetime-format-dateparse-perl libdatetime libipc-run3-perl`
+   `sudo apt install libdatetime-format-dateparse-perl libdatetime libdate-calc-perl libipc-run3-perl`
 
 ### Check file
 
